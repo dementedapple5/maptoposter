@@ -84,7 +84,8 @@ def load_theme(theme_name="feature_based"):
             "road_secondary": "#2A2A2A",
             "road_tertiary": "#3A3A3A",
             "road_residential": "#4A4A4A",
-            "road_default": "#3A3A3A"
+            "road_default": "#3A3A3A",
+            "subway": "#FF5722"
         }
     
     with open(theme_file, 'r') as f:
@@ -96,6 +97,27 @@ def load_theme(theme_name="feature_based"):
 
 # Load theme (can be changed via command line or input)
 THEME = None  # Will be loaded later
+
+AVAILABLE_LAYERS = ["roads", "water", "parks", "subway"]
+DEFAULT_LAYERS = ["roads", "water", "parks"]
+
+def parse_layers_arg(layers_arg):
+    """
+    Parse comma-separated layers list and filter to known layers.
+    Returns a list preserving input order.
+    """
+    if not layers_arg:
+        return DEFAULT_LAYERS.copy()
+    
+    raw_layers = [layer.strip().lower() for layer in layers_arg.split(",")]
+    layers = [layer for layer in raw_layers if layer in AVAILABLE_LAYERS]
+    
+    if not layers:
+        return []
+    
+    # De-duplicate while preserving order
+    seen = set()
+    return [layer for layer in layers if not (layer in seen or seen.add(layer))]
 
 def create_gradient_fade(ax, color, location='bottom', zorder=10):
     """
@@ -213,61 +235,101 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file):
-    print(f"\nGenerating map for {city}, {country}...")
+def create_poster(city, country, point, dist, output_file, layers, paper_size='3:4'):
+    print(f"\nGenerating map for {city}, {country} (Size: {paper_size})...")
+    
+    # Define aspect ratios (width, height)
+    aspect_ratios = {
+        '1:1': (12, 12),
+        '2:3': (12, 18),
+        '3:4': (12, 16),
+        '4:5': (12, 15),
+        'DIN': (12, 12 * 1.414),  # A-series
+    }
+    
+    width, height = aspect_ratios.get(paper_size, aspect_ratios['3:4'])
+    
+    layers_set = set(layers)
+    fetch_steps = []
+    if "roads" in layers_set:
+        fetch_steps.append("Downloading street network")
+    if "water" in layers_set:
+        fetch_steps.append("Downloading water features")
+    if "parks" in layers_set:
+        fetch_steps.append("Downloading parks/green spaces")
+    if "subway" in layers_set:
+        fetch_steps.append("Downloading subway lines")
+    
+    G = None
+    water = None
+    parks = None
+    subway = None
     
     # Progress bar for data fetching
-    with tqdm(total=3, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
-        # 1. Fetch Street Network
-        pbar.set_description("Downloading street network")
-        G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
-        pbar.update(1)
-        time.sleep(0.5)  # Rate limit between requests
+    with tqdm(total=len(fetch_steps), desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
+        if "roads" in layers_set:
+            pbar.set_description("Downloading street network")
+            G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
+            pbar.update(1)
+            time.sleep(0.5)  # Rate limit between requests
         
-        # 2. Fetch Water Features
-        pbar.set_description("Downloading water features")
-        try:
-            water = ox.features_from_point(point, tags={'natural': 'water', 'waterway': 'riverbank'}, dist=dist)
-        except:
-            water = None
-        pbar.update(1)
-        time.sleep(0.3)
+        if "water" in layers_set:
+            pbar.set_description("Downloading water features")
+            try:
+                water = ox.features_from_point(point, tags={'natural': 'water', 'waterway': 'riverbank'}, dist=dist)
+            except:
+                water = None
+            pbar.update(1)
+            time.sleep(0.3)
         
-        # 3. Fetch Parks
-        pbar.set_description("Downloading parks/green spaces")
-        try:
-            parks = ox.features_from_point(point, tags={'leisure': 'park', 'landuse': 'grass'}, dist=dist)
-        except:
-            parks = None
-        pbar.update(1)
+        if "parks" in layers_set:
+            pbar.set_description("Downloading parks/green spaces")
+            try:
+                parks = ox.features_from_point(point, tags={'leisure': 'park', 'landuse': 'grass'}, dist=dist)
+            except:
+                parks = None
+            pbar.update(1)
+            time.sleep(0.3)
+        
+        if "subway" in layers_set:
+            pbar.set_description("Downloading subway lines")
+            try:
+                subway = ox.features_from_point(point, tags={'railway': ['subway', 'light_rail', 'tram']}, dist=dist)
+            except:
+                subway = None
+            pbar.update(1)
     
     print("✓ All data downloaded successfully!")
     
     # 2. Setup Plot
     print("Rendering map...")
-    fig, ax = plt.subplots(figsize=(12, 16), facecolor=THEME['bg'])
+    fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME['bg'])
     ax.set_facecolor(THEME['bg'])
     ax.set_position([0, 0, 1, 1])
     
     # 3. Plot Layers
     # Layer 1: Polygons
-    if water is not None and not water.empty:
+    if "water" in layers_set and water is not None and not water.empty:
         water.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
-    if parks is not None and not parks.empty:
+    if "parks" in layers_set and parks is not None and not parks.empty:
         parks.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
+    if "subway" in layers_set and subway is not None and not subway.empty:
+        subway_color = THEME.get('subway', THEME.get('road_primary', '#111111'))
+        subway.plot(ax=ax, color=subway_color, linewidth=0.6, zorder=3)
     
     # Layer 2: Roads with hierarchy coloring
-    print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(G)
-    edge_widths = get_edge_widths_by_type(G)
-    
-    ox.plot_graph(
-        G, ax=ax, bgcolor=THEME['bg'],
-        node_size=0,
-        edge_color=edge_colors,
-        edge_linewidth=edge_widths,
-        show=False, close=False
-    )
+    if "roads" in layers_set and G is not None:
+        print("Applying road hierarchy colors...")
+        edge_colors = get_edge_colors_by_type(G)
+        edge_widths = get_edge_widths_by_type(G)
+        
+        ox.plot_graph(
+            G, ax=ax, bgcolor=THEME['bg'],
+            node_size=0,
+            edge_color=edge_colors,
+            edge_linewidth=edge_widths,
+            show=False, close=False
+        )
     
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
@@ -421,6 +483,8 @@ Examples:
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
+    parser.add_argument('--layers', type=str, help='Comma-separated layers (roads,water,parks,subway)')
+    parser.add_argument('--paper-size', '-s', type=str, default='3:4', choices=['1:1', '2:3', '3:4', '4:5', 'DIN'], help='Paper size / aspect ratio (default: 3:4)')
     
     args = parser.parse_args()
     
@@ -453,12 +517,13 @@ Examples:
     
     # Load theme
     THEME = load_theme(args.theme)
+    layers = parse_layers_arg(args.layers)
     
     # Get coordinates and generate poster
     try:
         coords = get_coordinates(args.city, args.country)
         output_file = generate_output_filename(args.city, args.theme)
-        create_poster(args.city, args.country, coords, args.distance, output_file)
+        create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
