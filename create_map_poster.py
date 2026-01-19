@@ -245,6 +245,8 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
         '3:4': (12, 16),
         '4:5': (12, 15),
         'DIN': (12, 12 * 1.414),  # A-series
+        '9:16': (9, 16),
+        '9:21': (9, 21),
     }
     
     width, height = aspect_ratios.get(paper_size, aspect_ratios['3:4'])
@@ -484,7 +486,9 @@ Examples:
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     parser.add_argument('--layers', type=str, help='Comma-separated layers (roads,water,parks,subway)')
-    parser.add_argument('--paper-size', '-s', type=str, default='3:4', choices=['1:1', '2:3', '3:4', '4:5', 'DIN'], help='Paper size / aspect ratio (default: 3:4)')
+    parser.add_argument('--paper-size', '-s', type=str, default='3:4', choices=['1:1', '2:3', '3:4', '4:5', 'DIN', '9:16', '9:21'], help='Paper size / aspect ratio (default: 3:4)')
+    parser.add_argument('--lat', type=float, help='Latitude for the map center')
+    parser.add_argument('--lng', type=float, help='Longitude for the map center')
     
     args = parser.parse_args()
     
@@ -521,7 +525,12 @@ Examples:
     
     # Get coordinates and generate poster
     try:
-        coords = get_coordinates(args.city, args.country)
+        if args.lat is not None and args.lng is not None:
+            coords = (args.lat, args.lng)
+            print(f"✓ Using provided coordinates: {coords}")
+        else:
+            coords = get_coordinates(args.city, args.country)
+            
         output_file = generate_output_filename(args.city, args.theme)
         create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size)
         

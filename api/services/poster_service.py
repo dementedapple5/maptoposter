@@ -46,7 +46,7 @@ def get_posters():
         })
     return posters
 
-def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4"):
+def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4", lat: float = None, lng: float = None):
     cmd = [
         PYTHON_BIN,
         SCRIPT_PATH,
@@ -56,6 +56,9 @@ def run_script(city: str, country: str, theme: str, distance: int, layers, paper
         "--distance", str(distance),
         "--paper-size", paper_size
     ]
+    
+    if lat is not None and lng is not None:
+        cmd.extend(["--lat", str(lat), "--lng", str(lng)])
     
     if layers:
         cmd.extend(["--layers", ",".join(layers)])
