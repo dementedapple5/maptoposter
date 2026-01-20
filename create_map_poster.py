@@ -387,7 +387,9 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
         if "roads" in layers_set:
             pbar.set_description("Downloading street network")
             if use_exact_bounds:
-                G = ox.graph_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'], network_type='all')
+                # bbox format: (west, south, east, north)
+                bbox = (bounds['west'], bounds['south'], bounds['east'], bounds['north'])
+                G = ox.graph_from_bbox(bbox, network_type='all')
             else:
                 G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
             pbar.update(1)
@@ -397,8 +399,9 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
             pbar.set_description("Downloading water features")
             try:
                 if use_exact_bounds:
-                    water = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'], 
-                                                  tags={'natural': 'water', 'waterway': 'riverbank'})
+                    # bbox format: (west, south, east, north)
+                    bbox = (bounds['west'], bounds['south'], bounds['east'], bounds['north'])
+                    water = ox.features_from_bbox(bbox, tags={'natural': 'water', 'waterway': 'riverbank'})
                 else:
                     water = ox.features_from_point(point, tags={'natural': 'water', 'waterway': 'riverbank'}, dist=dist)
             except:
@@ -410,8 +413,9 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
             pbar.set_description("Downloading parks/green spaces")
             try:
                 if use_exact_bounds:
-                    parks = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'],
-                                                  tags={'leisure': 'park', 'landuse': 'grass'})
+                    # bbox format: (west, south, east, north)
+                    bbox = (bounds['west'], bounds['south'], bounds['east'], bounds['north'])
+                    parks = ox.features_from_bbox(bbox, tags={'leisure': 'park', 'landuse': 'grass'})
                 else:
                     parks = ox.features_from_point(point, tags={'leisure': 'park', 'landuse': 'grass'}, dist=dist)
             except:
@@ -423,8 +427,9 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
             pbar.set_description("Downloading subway lines")
             try:
                 if use_exact_bounds:
-                    subway = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'],
-                                                   tags={'railway': ['subway', 'light_rail', 'tram']})
+                    # bbox format: (west, south, east, north)
+                    bbox = (bounds['west'], bounds['south'], bounds['east'], bounds['north'])
+                    subway = ox.features_from_bbox(bbox, tags={'railway': ['subway', 'light_rail', 'tram']})
                 else:
                     subway = ox.features_from_point(point, tags={'railway': ['subway', 'light_rail', 'tram']}, dist=dist)
             except:
@@ -517,13 +522,11 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
     
     # 4. Typography using Roboto font
     if FONTS:
-        font_main = FontProperties(fname=FONTS['bold'], size=60)
         font_top = FontProperties(fname=FONTS['bold'], size=40)
         font_sub = FontProperties(fname=FONTS['light'], size=22)
         font_coords = FontProperties(fname=FONTS['regular'], size=14)
     else:
         # Fallback to system fonts
-        font_main = FontProperties(family='monospace', weight='bold', size=60)
         font_top = FontProperties(family='monospace', weight='bold', size=40)
         font_sub = FontProperties(family='monospace', weight='normal', size=22)
         font_coords = FontProperties(family='monospace', size=14)
@@ -531,6 +534,55 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
     spaced_city = "  ".join(list(city.upper()))
 
     # --- BOTTOM TEXT ---
+    # Auto-adjust font size for title to fit within available width
+    initial_font_size = 60
+    min_font_size = 20
+    max_width_ratio = 0.85  # Use 85% of figure width
+    
+    # Get figure width in pixels
+    fig_width_inches = fig.get_figwidth()
+    fig_dpi = fig.dpi
+    fig_width_pixels = fig_width_inches * fig_dpi
+    max_text_width = fig_width_pixels * max_width_ratio
+    
+    # Start with initial font size
+    font_size = initial_font_size
+    
+    # Create temporary text to measure width
+    if FONTS:
+        test_font = FontProperties(fname=FONTS['bold'], size=font_size)
+    else:
+        test_font = FontProperties(family='monospace', weight='bold', size=font_size)
+    
+    temp_text = ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
+                        color=THEME['text'], ha='center', fontproperties=test_font, 
+                        zorder=11, alpha=0)
+    
+    # Measure and adjust font size
+    fig.canvas.draw()
+    bbox = temp_text.get_window_extent(renderer=fig.canvas.get_renderer())
+    text_width = bbox.width
+    
+    while text_width > max_text_width and font_size > min_font_size:
+        font_size -= 2
+        if FONTS:
+            test_font = FontProperties(fname=FONTS['bold'], size=font_size)
+        else:
+            test_font = FontProperties(family='monospace', weight='bold', size=font_size)
+        temp_text.set_fontproperties(test_font)
+        fig.canvas.draw()
+        bbox = temp_text.get_window_extent(renderer=fig.canvas.get_renderer())
+        text_width = bbox.width
+    
+    # Remove temporary text
+    temp_text.remove()
+    
+    # Add final text with adjusted font size
+    if FONTS:
+        font_main = FontProperties(fname=FONTS['bold'], size=font_size)
+    else:
+        font_main = FontProperties(family='monospace', weight='bold', size=font_size)
+    
     ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_main, zorder=11)
     

@@ -338,6 +338,7 @@ function App() {
     center: [41.3851, 2.1734], // Barcelona default
     zoom: 13
   });
+  const abortControllerRef = useRef(null);
 
   const availableLayers = [
     { id: 'roads', label: 'Roads' },
@@ -523,12 +524,16 @@ function App() {
       return;
     }
     
+    // Create a new AbortController for this request
+    abortControllerRef.current = new AbortController();
+    
     setLoading(true);
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(formData),
+        signal: abortControllerRef.current.signal
       });
       const data = await response.json();
       if (response.ok) {
@@ -538,8 +543,20 @@ function App() {
         alert(`Error: ${data.detail || 'Unknown error'}`);
       }
     } catch (error) {
-      alert(`Error: ${error.message}`);
+      if (error.name === 'AbortError') {
+        console.log('Generation cancelled by user');
+      } else {
+        alert(`Error: ${error.message}`);
+      }
     } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
       setLoading(false);
     }
   };
@@ -630,6 +647,17 @@ function App() {
             >
               {loading ? 'Generating...' : 'Generate Poster'}
             </button>
+            
+            {loading && (
+              <button 
+                type="button"
+                onClick={stopGeneration}
+                className="primary"
+                style={{ background: '#dc3545', color: '#fff', border: 'none', marginTop: '8px', marginLeft: '24px' }}
+              >
+                Stop Generation
+              </button>
+            )}
           </form>
 
           {currentPoster && (
