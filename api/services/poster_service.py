@@ -46,7 +46,7 @@ def get_posters():
         })
     return posters
 
-def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4", lat: float = None, lng: float = None, grain: bool = False):
+def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4", lat: float = None, lng: float = None, grain: bool = False, bounds: dict = None, dpi: int = 300):
     cmd = [
         PYTHON_BIN,
         SCRIPT_PATH,
@@ -54,7 +54,8 @@ def run_script(city: str, country: str, theme: str, distance: int, layers, paper
         "--country", country,
         "--theme", theme,
         "--distance", str(distance),
-        "--paper-size", paper_size
+        "--paper-size", paper_size,
+        "--dpi", str(dpi)
     ]
     
     if lat is not None and lng is not None:
@@ -65,6 +66,12 @@ def run_script(city: str, country: str, theme: str, distance: int, layers, paper
     
     if grain:
         cmd.append("--grain")
+    
+    if bounds:
+        cmd.extend([
+            "--bounds",
+            f"{bounds['north']},{bounds['south']},{bounds['east']},{bounds['west']}"
+        ])
     
     # Get the project root directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

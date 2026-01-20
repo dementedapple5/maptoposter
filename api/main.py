@@ -22,6 +22,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class Bounds(BaseModel):
+    north: float
+    south: float
+    east: float
+    west: float
+
 class GenerateRequest(BaseModel):
     city: str = ""
     country: str = ""
@@ -33,6 +39,8 @@ class GenerateRequest(BaseModel):
     lat: float = None
     lng: float = None
     grain: bool = False
+    bounds: Bounds = None
+    dpi: int = 300
 
 class GeocodeRequest(BaseModel):
     city: str
@@ -137,7 +145,9 @@ async def generate(request: GenerateRequest):
             paper_size=request.paper_size,
             lat=request.lat,
             lng=request.lng,
-            grain=request.grain
+            grain=request.grain,
+            bounds=request.bounds.dict() if request.bounds else None,
+            dpi=request.dpi
         )
         return result
     except Exception as e:

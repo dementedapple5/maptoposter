@@ -106,7 +106,7 @@ def add_blur_fade_top(image, fade_height_ratio=0.35, max_blur=8):
     
     return result
 
-def apply_post_processing(fig, output_file, paper_size='3:4', grain=False, bg_color='#FFFFFF'):
+def apply_post_processing(fig, output_file, paper_size='3:4', grain=False, bg_color='#FFFFFF', dpi=300):
     """
     Apply post-processing effects and save the final image.
     
@@ -116,10 +116,11 @@ def apply_post_processing(fig, output_file, paper_size='3:4', grain=False, bg_co
         paper_size: paper size for determining effects
         grain: whether to add grain effect
         bg_color: background color for the image
+        dpi: dots per inch for the output image (default: 300)
     """
     # Save figure to buffer first
     buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=300, facecolor=bg_color)
+    fig.savefig(buf, format='png', dpi=dpi, facecolor=bg_color)
     buf.seek(0)
     
     # Load with PIL
@@ -346,8 +347,8 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file, layers, paper_size='3:4', grain=False):
-    print(f"\nGenerating map for {city}, {country} (Size: {paper_size})...")
+def create_poster(city, country, point, dist, output_file, layers, paper_size='3:4', grain=False, bounds=None, dpi=300):
+    print(f"\nGenerating map for {city}, {country} (Size: {paper_size}, DPI: {dpi})...")
     
     # Define aspect ratios (width, height)
     aspect_ratios = {
@@ -378,18 +379,28 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
     parks = None
     subway = None
     
+    # Use exact bounds if provided, otherwise use center point + distance
+    use_exact_bounds = bounds is not None and all(k in bounds for k in ['north', 'south', 'east', 'west'])
+    
     # Progress bar for data fetching
     with tqdm(total=len(fetch_steps), desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
         if "roads" in layers_set:
             pbar.set_description("Downloading street network")
-            G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
+            if use_exact_bounds:
+                G = ox.graph_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'], network_type='all')
+            else:
+                G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
             pbar.update(1)
             time.sleep(0.5)  # Rate limit between requests
         
         if "water" in layers_set:
             pbar.set_description("Downloading water features")
             try:
-                water = ox.features_from_point(point, tags={'natural': 'water', 'waterway': 'riverbank'}, dist=dist)
+                if use_exact_bounds:
+                    water = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'], 
+                                                  tags={'natural': 'water', 'waterway': 'riverbank'})
+                else:
+                    water = ox.features_from_point(point, tags={'natural': 'water', 'waterway': 'riverbank'}, dist=dist)
             except:
                 water = None
             pbar.update(1)
@@ -398,7 +409,11 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
         if "parks" in layers_set:
             pbar.set_description("Downloading parks/green spaces")
             try:
-                parks = ox.features_from_point(point, tags={'leisure': 'park', 'landuse': 'grass'}, dist=dist)
+                if use_exact_bounds:
+                    parks = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'],
+                                                  tags={'leisure': 'park', 'landuse': 'grass'})
+                else:
+                    parks = ox.features_from_point(point, tags={'leisure': 'park', 'landuse': 'grass'}, dist=dist)
             except:
                 parks = None
             pbar.update(1)
@@ -407,7 +422,11 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
         if "subway" in layers_set:
             pbar.set_description("Downloading subway lines")
             try:
-                subway = ox.features_from_point(point, tags={'railway': ['subway', 'light_rail', 'tram']}, dist=dist)
+                if use_exact_bounds:
+                    subway = ox.features_from_bbox(bounds['north'], bounds['south'], bounds['east'], bounds['west'],
+                                                   tags={'railway': ['subway', 'light_rail', 'tram']})
+                else:
+                    subway = ox.features_from_point(point, tags={'railway': ['subway', 'light_rail', 'tram']}, dist=dist)
             except:
                 subway = None
             pbar.update(1)
@@ -447,7 +466,8 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
     # Preserve geographic aspect ratio and crop to fill the paper format
     ax.set_aspect('equal')
     
-    # Crop axis limits to fill the paper aspect ratio without stretching
+    # When using exact bounds, only do minimal cropping to match aspect ratio
+    # Otherwise, crop more aggressively to fill the paper format
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     
@@ -460,14 +480,30 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
     target_ratio = width / height
     current_ratio = data_width / data_height
     
-    if current_ratio > target_ratio:
-        # Data is wider than target - crop width to fit
-        new_width = data_height * target_ratio
-        ax.set_xlim(data_center_x - new_width / 2, data_center_x + new_width / 2)
+    # If using exact bounds, be less aggressive with cropping (allow 5% tolerance)
+    if use_exact_bounds:
+        tolerance = 0.05
+        ratio_diff = abs(current_ratio - target_ratio) / target_ratio
+        
+        if ratio_diff > tolerance:
+            if current_ratio > target_ratio:
+                # Data is slightly wider - crop width minimally
+                new_width = data_height * target_ratio
+                ax.set_xlim(data_center_x - new_width / 2, data_center_x + new_width / 2)
+            else:
+                # Data is slightly taller - crop height minimally
+                new_height = data_width / target_ratio
+                ax.set_ylim(data_center_y - new_height / 2, data_center_y + new_height / 2)
     else:
-        # Data is taller than target - crop height to fit
-        new_height = data_width / target_ratio
-        ax.set_ylim(data_center_y - new_height / 2, data_center_y + new_height / 2)
+        # Original behavior for center+distance mode
+        if current_ratio > target_ratio:
+            # Data is wider than target - crop width to fit
+            new_width = data_height * target_ratio
+            ax.set_xlim(data_center_x - new_width / 2, data_center_x + new_width / 2)
+        else:
+            # Data is taller than target - crop height to fit
+            new_height = data_width / target_ratio
+            ax.set_ylim(data_center_y - new_height / 2, data_center_y + new_height / 2)
     
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
@@ -524,7 +560,7 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
 
     # 5. Save with post-processing
     print(f"Saving to {output_file}...")
-    apply_post_processing(fig, output_file, paper_size=paper_size, grain=grain, bg_color=THEME['bg'])
+    apply_post_processing(fig, output_file, paper_size=paper_size, grain=grain, bg_color=THEME['bg'], dpi=dpi)
     plt.close()
     print(f"✓ Done! Poster saved as {output_file}")
 
@@ -632,6 +668,8 @@ Examples:
     parser.add_argument('--lat', type=float, help='Latitude for the map center')
     parser.add_argument('--lng', type=float, help='Longitude for the map center')
     parser.add_argument('--grain', action='store_true', help='Add film grain/noise effect to the image')
+    parser.add_argument('--bounds', type=str, help='Exact map bounds as north,south,east,west (e.g., 40.7589,-74.0060,40.7489,-74.0160)')
+    parser.add_argument('--dpi', type=int, default=300, choices=[72, 150, 300], help='Output resolution in DPI (default: 300)')
     
     args = parser.parse_args()
     
@@ -666,6 +704,24 @@ Examples:
     THEME = load_theme(args.theme)
     layers = parse_layers_arg(args.layers)
     
+    # Parse bounds if provided
+    bounds = None
+    if args.bounds:
+        try:
+            parts = [float(x.strip()) for x in args.bounds.split(',')]
+            if len(parts) == 4:
+                bounds = {
+                    'north': parts[0],
+                    'south': parts[1],
+                    'east': parts[2],
+                    'west': parts[3]
+                }
+                print(f"✓ Using provided bounds: N={bounds['north']}, S={bounds['south']}, E={bounds['east']}, W={bounds['west']}")
+            else:
+                print("⚠ Invalid bounds format. Expected: north,south,east,west")
+        except ValueError:
+            print("⚠ Invalid bounds values. Expected numeric values.")
+    
     # Get coordinates and generate poster
     try:
         if args.lat is not None and args.lng is not None:
@@ -675,7 +731,7 @@ Examples:
             coords = get_coordinates(args.city, args.country)
             
         output_file = generate_output_filename(args.city, args.theme)
-        create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size, args.grain)
+        create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size, args.grain, bounds, args.dpi)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")

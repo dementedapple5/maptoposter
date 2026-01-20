@@ -13,18 +13,31 @@ L.Icon.Default.mergeOptions({
 });
 
 const MapEvents = ({ onBoundsChange }) => {
+  const timeoutRef = useRef(null);
+  
   const map = useMapEvents({
     moveend: () => {
-      const center = map.getCenter();
-      const bounds = map.getBounds();
-      onBoundsChange(center, bounds);
+      // Debounce the bounds change to avoid too many API calls
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        const center = map.getCenter();
+        const bounds = map.getBounds();
+        onBoundsChange(center, bounds);
+      }, 500); // Wait 500ms after user stops moving
     },
     zoomend: () => {
+      // Immediate update on zoom end
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
       const center = map.getCenter();
       const bounds = map.getBounds();
       onBoundsChange(center, bounds);
     },
   });
+  
   return null;
 };
 
@@ -58,6 +71,11 @@ const LocationAutocomplete = ({ value, onChange, onNavigate }) => {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Update query when value prop changes (e.g., from map interaction)
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -271,6 +289,9 @@ const CustomSelect = ({ label, value, options, onChange, name }) => {
                 </span>
                 <span className="item-label">{option.name || option.label}</span>
               </div>
+              {option.subtitle && (
+                <div className="item-subtitle">{option.subtitle}</div>
+              )}
             </div>
           ))}
         </div>
@@ -334,6 +355,27 @@ function App() {
     { id: '9:16', label: 'Instagram Story' },
     { id: '9:19.5', label: 'iPhone Wallpaper' }
   ];
+
+  const dpiOptions = [
+    { 
+      id: 72, 
+      label: 'Small', 
+      name: 'Small',
+      subtitle: 'Fast generation • Perfect for digital screens and social media' 
+    },
+    { 
+      id: 150, 
+      label: 'Medium', 
+      name: 'Medium',
+      subtitle: 'Moderate generation time • Good balance for prints and displays' 
+    },
+    { 
+      id: 300, 
+      label: 'Large', 
+      name: 'Large',
+      subtitle: 'Longer generation time • High quality for professional printing' 
+    }
+  ];
   
   const [formData, setFormData] = useState({
     location: '',
@@ -345,7 +387,9 @@ function App() {
     paper_size: '3:4',
     lat: null,
     lng: null,
-    grain: false
+    grain: false,
+    bounds: null,
+    dpi: 300
   });
 
   useEffect(() => {
@@ -377,7 +421,7 @@ function App() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'distance' ? parseInt(value) || 0 : value
+      [name]: (name === 'distance' || name === 'dpi') ? parseInt(value) || 0 : value
     }));
   };
 
@@ -408,18 +452,57 @@ function App() {
     setCurrentPoster(null);
   };
 
-  const handleBoundsChange = (center, bounds) => {
+  const handleBoundsChange = async (center, bounds) => {
     const northEast = bounds.getNorthEast();
+    const southWest = bounds.getSouthWest();
     const centerLatLng = L.latLng(center.lat, center.lng);
     const northCenter = L.latLng(northEast.lat, center.lng);
     const dist = centerLatLng.distanceTo(northCenter); // Radius in meters
     
-    setFormData(prev => ({
-      ...prev,
-      lat: center.lat,
-      lng: center.lng,
-      distance: Math.round(dist)
-    }));
+    // Reverse geocode to update location field
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${center.lat}&lon=${center.lng}&zoom=10&addressdetails=1`,
+        { headers: { Accept: 'application/json' } }
+      );
+      const data = await response.json();
+      const address = data.address || {};
+      const city = address.city || address.town || address.village || address.municipality || address.state || '';
+      const country = address.country || '';
+      const displayName = city && country ? `${city}, ${country}` : data.display_name?.split(', ').slice(0, 2).join(', ') || '';
+      
+      setFormData(prev => ({
+        ...prev,
+        location: displayName,
+        city: city || displayName.split(',')[0].trim(),
+        country: country,
+        lat: center.lat,
+        lng: center.lng,
+        distance: Math.round(dist),
+        // Store exact bounds for precise rendering
+        bounds: {
+          north: northEast.lat,
+          south: southWest.lat,
+          east: northEast.lng,
+          west: southWest.lng
+        }
+      }));
+    } catch (error) {
+      console.error('Reverse geocoding failed:', error);
+      // Update coordinates even if reverse geocoding fails
+      setFormData(prev => ({
+        ...prev,
+        lat: center.lat,
+        lng: center.lng,
+        distance: Math.round(dist),
+        bounds: {
+          north: northEast.lat,
+          south: southWest.lat,
+          east: northEast.lng,
+          west: southWest.lng
+        }
+      }));
+    }
   };
 
   const toggleLayer = (layerId) => {
@@ -500,6 +583,14 @@ function App() {
               name="paper_size"
               value={formData.paper_size}
               options={paperSizes}
+              onChange={handleInputChange}
+            />
+
+            <CustomSelect
+              label="Quality"
+              name="dpi"
+              value={formData.dpi}
+              options={dpiOptions}
               onChange={handleInputChange}
             />
 
