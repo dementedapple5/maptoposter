@@ -5,7 +5,7 @@ from datetime import datetime
 
 THEMES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "themes")
 POSTERS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "posters")
-PYTHON_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "maptoposter", "bin", "python")
+PYTHON_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".venv", "bin", "python")
 SCRIPT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "create_map_poster.py")
 
 def get_themes():
@@ -46,7 +46,7 @@ def get_posters():
         })
     return posters
 
-def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4", lat: float = None, lng: float = None):
+def run_script(city: str, country: str, theme: str, distance: int, layers, paper_size: str = "3:4", lat: float = None, lng: float = None, grain: bool = False):
     cmd = [
         PYTHON_BIN,
         SCRIPT_PATH,
@@ -62,6 +62,9 @@ def run_script(city: str, country: str, theme: str, distance: int, layers, paper
     
     if layers:
         cmd.extend(["--layers", ",".join(layers)])
+    
+    if grain:
+        cmd.append("--grain")
     
     # Get the project root directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

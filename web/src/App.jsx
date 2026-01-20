@@ -287,7 +287,7 @@ const getAspectRatioValue = (sizeId) => {
     case '4:5': return 4 / 5;
     case 'DIN': return 1 / 1.414;
     case '9:16': return 9 / 16;
-    case '9:21': return 9 / 21;
+    case '9:19.5': return 9 / 21;
     default: return 3 / 4;
   }
 };
@@ -331,8 +331,8 @@ function App() {
     { id: '3:4', label: 'Classic (3:4)' },
     { id: '4:5', label: 'Frame (4:5)' },
     { id: 'DIN', label: 'DIN (A4, A3)' },
-    { id: '9:16', label: '9:16 (Story)' },
-    { id: '9:21', label: '9:21 (iPhone)' }
+    { id: '9:16', label: 'Instagram Story' },
+    { id: '9:19.5', label: 'iPhone Wallpaper' }
   ];
   
   const [formData, setFormData] = useState({
@@ -344,7 +344,8 @@ function App() {
     layers: ['roads', 'water', 'parks'],
     paper_size: '3:4',
     lat: null,
-    lng: null
+    lng: null,
+    grain: false
   });
 
   useEffect(() => {
@@ -516,6 +517,19 @@ function App() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="form-group toggle-group">
+              <label htmlFor="grain-toggle">Film Grain</label>
+              <button
+                type="button"
+                id="grain-toggle"
+                className={`toggle-switch ${formData.grain ? 'active' : ''}`}
+                onClick={() => setFormData(prev => ({ ...prev, grain: !prev.grain }))}
+                aria-pressed={formData.grain}
+              >
+                <span className="toggle-slider" />
+              </button>
             </div>
 
             <button 

@@ -32,6 +32,7 @@ class GenerateRequest(BaseModel):
     paper_size: str = "3:4"
     lat: float = None
     lng: float = None
+    grain: bool = False
 
 class GeocodeRequest(BaseModel):
     city: str
@@ -135,7 +136,8 @@ async def generate(request: GenerateRequest):
             layers=request.layers,
             paper_size=request.paper_size,
             lat=request.lat,
-            lng=request.lng
+            lng=request.lng,
+            grain=request.grain
         )
         return result
     except Exception as e:

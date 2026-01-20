@@ -10,6 +10,8 @@ import json
 import os
 from datetime import datetime
 import argparse
+from PIL import Image, ImageFilter
+from io import BytesIO
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
@@ -35,6 +37,108 @@ def load_fonts():
     return fonts
 
 FONTS = load_fonts()
+
+def add_grain_effect(image, intensity=0.08):
+    """
+    Add film grain/noise effect to an image.
+    
+    Args:
+        image: PIL Image object
+        intensity: Grain intensity (0.0 to 1.0, default 0.08 for subtle effect)
+    
+    Returns:
+        PIL Image with grain applied
+    """
+    img_array = np.array(image).astype(np.float32)
+    
+    # Generate noise
+    noise = np.random.normal(0, intensity * 255, img_array.shape)
+    
+    # Add noise to image
+    noisy = img_array + noise
+    noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+    
+    return Image.fromarray(noisy)
+
+def add_blur_fade_top(image, fade_height_ratio=0.35, max_blur=8):
+    """
+    Add a graduated blur effect at the top of the image that fades to sharp.
+    Perfect for iPhone lock screen to blend with widgets.
+    
+    Args:
+        image: PIL Image object
+        fade_height_ratio: How much of the image height to apply the effect (0.0 to 1.0)
+        max_blur: Maximum blur radius at the very top
+    
+    Returns:
+        PIL Image with blur fade applied
+    """
+    width, height = image.size
+    fade_height = int(height * fade_height_ratio)
+    
+    # Create a fully blurred version
+    blurred = image.filter(ImageFilter.GaussianBlur(radius=max_blur))
+    
+    # Create the output image starting with the original
+    result = image.copy()
+    
+    # Blend gradually from blurred (top) to sharp (bottom of fade zone)
+    # We'll do this in horizontal strips for a smooth transition
+    num_steps = min(fade_height, 50)  # Limit steps for performance
+    step_height = fade_height // num_steps
+    
+    for i in range(num_steps):
+        y_start = i * step_height
+        y_end = (i + 1) * step_height if i < num_steps - 1 else fade_height
+        
+        # Calculate blend factor (1.0 at top = full blur, 0.0 at bottom = no blur)
+        blend = 1.0 - (i / num_steps)
+        
+        # Get strips from both images
+        original_strip = image.crop((0, y_start, width, y_end))
+        blurred_strip = blurred.crop((0, y_start, width, y_end))
+        
+        # Blend the strips
+        blended_strip = Image.blend(original_strip, blurred_strip, blend)
+        
+        # Paste into result
+        result.paste(blended_strip, (0, y_start))
+    
+    return result
+
+def apply_post_processing(fig, output_file, paper_size='3:4', grain=False, bg_color='#FFFFFF'):
+    """
+    Apply post-processing effects and save the final image.
+    
+    Args:
+        fig: matplotlib figure
+        output_file: output file path
+        paper_size: paper size for determining effects
+        grain: whether to add grain effect
+        bg_color: background color for the image
+    """
+    # Save figure to buffer first
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=300, facecolor=bg_color)
+    buf.seek(0)
+    
+    # Load with PIL
+    image = Image.open(buf)
+    image = image.convert('RGB')
+    
+    # Apply blur fade for iPhone wallpaper
+    if paper_size == '9:19.5':
+        print("Applying blur fade effect for iPhone wallpaper...")
+        image = add_blur_fade_top(image, fade_height_ratio=0.35, max_blur=12)
+    
+    # Apply grain if enabled
+    if grain:
+        print("Adding grain effect...")
+        image = add_grain_effect(image, intensity=0.12)
+    
+    # Save final image
+    image.save(output_file, 'PNG', quality=95)
+    buf.close()
 
 def generate_output_filename(city, theme_name):
     """
@@ -119,9 +223,16 @@ def parse_layers_arg(layers_arg):
     seen = set()
     return [layer for layer in layers if not (layer in seen or seen.add(layer))]
 
-def create_gradient_fade(ax, color, location='bottom', zorder=10):
+def create_gradient_fade(ax, color, location='bottom', zorder=10, extent_size=0.25):
     """
     Creates a fade effect at the top or bottom of the map.
+    
+    Args:
+        ax: matplotlib axes
+        color: gradient color
+        location: 'bottom' or 'top'
+        zorder: z-order for layering
+        extent_size: fraction of the image height for the gradient (default 0.25 = 25%)
     """
     vals = np.linspace(0, 1, 256).reshape(-1, 1)
     gradient = np.hstack((vals, vals))
@@ -135,10 +246,10 @@ def create_gradient_fade(ax, color, location='bottom', zorder=10):
     if location == 'bottom':
         my_colors[:, 3] = np.linspace(1, 0, 256)
         extent_y_start = 0
-        extent_y_end = 0.25
+        extent_y_end = extent_size
     else:
         my_colors[:, 3] = np.linspace(0, 1, 256)
-        extent_y_start = 0.75
+        extent_y_start = 1.0 - extent_size
         extent_y_end = 1.0
 
     custom_cmap = mcolors.ListedColormap(my_colors)
@@ -235,7 +346,7 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file, layers, paper_size='3:4'):
+def create_poster(city, country, point, dist, output_file, layers, paper_size='3:4', grain=False):
     print(f"\nGenerating map for {city}, {country} (Size: {paper_size})...")
     
     # Define aspect ratios (width, height)
@@ -246,7 +357,7 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
         '4:5': (12, 15),
         'DIN': (12, 12 * 1.414),  # A-series
         '9:16': (9, 16),
-        '9:21': (9, 21),
+        '9:19.5': (9, 19.5),
     }
     
     width, height = aspect_ratios.get(paper_size, aspect_ratios['3:4'])
@@ -333,9 +444,40 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
             show=False, close=False
         )
     
+    # Preserve geographic aspect ratio and crop to fill the paper format
+    ax.set_aspect('equal')
+    
+    # Crop axis limits to fill the paper aspect ratio without stretching
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    
+    data_width = xlim[1] - xlim[0]
+    data_height = ylim[1] - ylim[0]
+    data_center_x = (xlim[0] + xlim[1]) / 2
+    data_center_y = (ylim[0] + ylim[1]) / 2
+    
+    # Target aspect ratio from paper size (width / height)
+    target_ratio = width / height
+    current_ratio = data_width / data_height
+    
+    if current_ratio > target_ratio:
+        # Data is wider than target - crop width to fit
+        new_width = data_height * target_ratio
+        ax.set_xlim(data_center_x - new_width / 2, data_center_x + new_width / 2)
+    else:
+        # Data is taller than target - crop height to fit
+        new_height = data_width / target_ratio
+        ax.set_ylim(data_center_y - new_height / 2, data_center_y + new_height / 2)
+    
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+    
+    # For iPhone lock screen (9:19.5), use a taller top gradient to blend with 
+    # the time display and widgets
+    if paper_size == '9:19.5':
+        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10, extent_size=0.40)
+    else:
+        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
     
     # 4. Typography using Roboto font
     if FONTS:
@@ -380,9 +522,9 @@ def create_poster(city, country, point, dist, output_file, layers, paper_size='3
             color=THEME['text'], alpha=0.5, ha='right', va='bottom', 
             fontproperties=font_attr, zorder=11)
 
-    # 5. Save
+    # 5. Save with post-processing
     print(f"Saving to {output_file}...")
-    plt.savefig(output_file, dpi=300, facecolor=THEME['bg'])
+    apply_post_processing(fig, output_file, paper_size=paper_size, grain=grain, bg_color=THEME['bg'])
     plt.close()
     print(f"✓ Done! Poster saved as {output_file}")
 
@@ -486,9 +628,10 @@ Examples:
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     parser.add_argument('--layers', type=str, help='Comma-separated layers (roads,water,parks,subway)')
-    parser.add_argument('--paper-size', '-s', type=str, default='3:4', choices=['1:1', '2:3', '3:4', '4:5', 'DIN', '9:16', '9:21'], help='Paper size / aspect ratio (default: 3:4)')
+    parser.add_argument('--paper-size', '-s', type=str, default='3:4', choices=['1:1', '2:3', '3:4', '4:5', 'DIN', '9:16', '9:19.5'], help='Paper size / aspect ratio (default: 3:4)')
     parser.add_argument('--lat', type=float, help='Latitude for the map center')
     parser.add_argument('--lng', type=float, help='Longitude for the map center')
+    parser.add_argument('--grain', action='store_true', help='Add film grain/noise effect to the image')
     
     args = parser.parse_args()
     
@@ -532,7 +675,7 @@ Examples:
             coords = get_coordinates(args.city, args.country)
             
         output_file = generate_output_filename(args.city, args.theme)
-        create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size)
+        create_poster(args.city, args.country, coords, args.distance, output_file, layers, args.paper_size, args.grain)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
